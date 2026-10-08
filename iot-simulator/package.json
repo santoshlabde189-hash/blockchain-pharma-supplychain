@@ -1,0 +1,12 @@
+{
+  "name": "pharma-trace-iot-simulator",
+  "version": "1.0.0",
+  "description": "IoT Cold Chain Sensor Simulator for PharmaTrace",
+  "main": "simulator.js",
+  "scripts": {
+    "start": "node simulator.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.3.6"
+  }
+}

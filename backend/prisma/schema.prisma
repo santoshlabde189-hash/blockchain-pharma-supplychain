@@ -1,0 +1,179 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Organization {
+  id         String   @id @db.VarChar(30)
+  name       String   @db.VarChar(150)
+  role       String   @db.VarChar(20) // MANUFACTURER, DISTRIBUTOR, PHARMACY, REGULATOR
+  licenseNo  String   @unique @map("license_no") @db.VarChar(60)
+  address    String?  @db.Text
+  status     String   @default("ACTIVE") @db.VarChar(15)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  users            User[]
+  products         Product[]
+  items            Item[]
+  shipmentsFrom    Shipment[]     @relation("ShipmentsFrom")
+  shipmentsTo      Shipment[]     @relation("ShipmentsTo")
+  recallsInitiated Recall[]
+  notifications    Notification[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             Int          @id @default(autoincrement())
+  orgId          String?      @map("org_id") @db.VarChar(30)
+  name           String       @db.VarChar(100)
+  email          String       @unique @db.VarChar(150)
+  passwordHash   String       @map("password_hash") @db.Text
+  role           String       @db.VarChar(20)
+  fabricIdentity String?      @map("fabric_identity") @db.VarChar(100)
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  organization   Organization? @relation(fields: [orgId], references: [id])
+
+  @@map("users")
+}
+
+model Product {
+  gtin           String        @id @db.VarChar(14)
+  name           String        @db.VarChar(150)
+  composition    String?       @db.Text
+  dosageForm     String?       @map("dosage_form") @db.VarChar(50)
+  strength       String?       @db.VarChar(50)
+  manufacturerId String?       @map("manufacturer_id") @db.VarChar(30)
+  txId           String?       @map("tx_id") @db.VarChar(80)
+
+  manufacturer   Organization? @relation(fields: [manufacturerId], references: [id])
+  batches        Batch[]
+
+  @@map("products")
+}
+
+model Batch {
+  batchId      String        @id @map("batch_id") @db.VarChar(40)
+  gtin         String?       @db.VarChar(14)
+  mfgDate      DateTime      @map("mfg_date") @db.Date
+  expDate      DateTime      @map("exp_date") @db.Date
+  quantity     Int
+  status       String        @default("ACTIVE") @db.VarChar(15)
+  qcCertUrl    String?       @map("qc_cert_url") @db.Text
+  qcCertHash   String?       @map("qc_cert_hash") @db.VarChar(80)
+  txId         String?       @map("tx_id") @db.VarChar(80)
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  product      Product?      @relation(fields: [gtin], references: [gtin])
+  items        Item[]
+  recalls      Recall[]
+
+  @@map("batches")
+}
+
+model Item {
+  serial       String        @id @db.VarChar(60)
+  batchId      String?       @map("batch_id") @db.VarChar(40)
+  level        String        @db.VarChar(10) // UNIT, CARTON, PALLET
+  parentSerial String?       @map("parent_serial") @db.VarChar(60)
+  ownerId      String?       @map("owner_id") @db.VarChar(30)
+  status       String        @db.VarChar(15)
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  batch        Batch?        @relation(fields: [batchId], references: [batchId])
+  owner        Organization? @relation(fields: [ownerId], references: [id])
+  shipmentItems ShipmentItem[]
+
+  @@index([batchId, ownerId], name: "idx_items_batch_owner")
+  @@map("items")
+}
+
+model Shipment {
+  shipmentId   String        @id @map("shipment_id") @db.VarChar(40)
+  fromOrg      String?       @map("from_org") @db.VarChar(30)
+  toOrg        String?       @map("to_org") @db.VarChar(30)
+  status       String        @db.VarChar(15) // CREATED, IN_TRANSIT, RECEIVED, REJECTED
+  excursion    Boolean       @default(false)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  receivedAt   DateTime?     @map("received_at")
+  txId         String?       @map("tx_id") @db.VarChar(80)
+
+  sender       Organization? @relation("ShipmentsFrom", fields: [fromOrg], references: [id])
+  receiver     Organization? @relation("ShipmentsTo", fields: [toOrg], references: [id])
+  items        ShipmentItem[]
+  sensorReadings SensorReading[]
+
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  shipmentId   String   @map("shipment_id") @db.VarChar(40)
+  serial       String   @db.VarChar(60)
+
+  shipment     Shipment @relation(fields: [shipmentId], references: [shipmentId])
+  item         Item     @relation(fields: [serial], references: [serial])
+
+  @@id([shipmentId, serial])
+  @@map("shipment_items")
+}
+
+model SensorReading {
+  id           BigInt   @id @default(autoincrement())
+  shipmentId   String?  @map("shipment_id") @db.VarChar(40)
+  deviceId     String?  @map("device_id") @db.VarChar(50)
+  temperatureC Decimal? @map("temperature_c") @db.Decimal(5, 2)
+  humidityPct  Decimal? @map("humidity_pct") @db.Decimal(5, 2)
+  latitude     Decimal? @db.Decimal(9, 6)
+  longitude    Decimal? @db.Decimal(9, 6)
+  recordedAt   DateTime @map("recorded_at")
+
+  shipment     Shipment? @relation(fields: [shipmentId], references: [shipmentId])
+
+  @@index([shipmentId, recordedAt], name: "idx_sensor_ship_time")
+  @@map("sensor_readings")
+}
+
+model LedgerEvent {
+  id          BigInt   @id @default(autoincrement())
+  txId        String   @map("tx_id") @db.VarChar(80)
+  blockNumber BigInt?  @map("block_number")
+  eventName   String?  @map("event_name") @db.VarChar(50)
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("ledger_events")
+}
+
+model Recall {
+  id          Int      @id @default(autoincrement())
+  batchId     String?  @map("batch_id") @db.VarChar(40)
+  initiatedBy String?  @map("initiated_by") @db.VarChar(30)
+  reason      String   @db.Text
+  severity    String?  @db.VarChar(10) // CLASS_I, CLASS_II, CLASS_III
+  txId        String?  @map("tx_id") @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  batch       Batch?   @relation(fields: [batchId], references: [batchId])
+  initiator   Organization? @relation(fields: [initiatedBy], references: [id])
+
+  @@map("recalls")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  orgId     String?  @map("org_id") @db.VarChar(30)
+  type      String?  @db.VarChar(30) // RECALL, EXCURSION, SHIPMENT
+  message   String?  @db.Text
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  @@map("notifications")
+}
